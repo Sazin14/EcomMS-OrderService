@@ -17,6 +17,6 @@ jobs:
 
           cd repo.git
 
-          git remote set-url --push origin https://oauth2:${GITLAB_TOKEN}@gitlab.com/<GITLAB_GROUP>/<GITLAB_REPOSITORY>.git
+          git remote set-url --push origin https://oauth2:${GITLAB_TOKEN}@gitlab.com/ecomms1/ecomms-orderservice.git
 
           git push --mirror
