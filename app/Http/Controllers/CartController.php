@@ -2,70 +2,54 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\CartItem;
+use App\Http\Controllers\Concerns\ReadsIdentity;
 use App\Services\CartService;
 use Illuminate\Http\Request;
 
 class CartController extends Controller
 {
+    use ReadsIdentity;
+
     public function __construct(private CartService $carts) {}
 
     public function show(Request $request)
     {
-        $customerId = $request->attributes->get('user_type') === 'customer'
-            ? (int) $request->attributes->get('user_id')
-            : null;
-
-        $cart = $this->carts->getOrCreate(
-            $customerId,
-            $request->header('X-Cart-Session')
-        );
-
-        return response()->json($cart->load('items'));
+        return $this->carts->view($this->carts->getOrCreate($this->customerId($request)));
     }
 
+    /** Only the variant and the quantity come from the browser; name and price are looked up in ProductService. */
     public function addItem(Request $request)
     {
         $data = $request->validate([
-            'product_id' => ['required', 'integer'],
-            'variant_id' => ['required', 'integer'],
-            'sku' => ['required', 'string', 'max:100'],
-            'product_name' => ['required', 'string', 'max:255'],
-            'variant_name' => ['nullable', 'string', 'max:255'],
-            'quantity' => ['required', 'integer', 'min:1', 'max:1000'],
-            'unit_price' => ['required', 'numeric', 'min:0'],
-        ]);
-
-        $customerId = $request->attributes->get('user_type') === 'customer'
-            ? (int) $request->attributes->get('user_id')
-            : null;
-
-        $cart = $this->carts->getOrCreate(
-            $customerId,
-            $request->header('X-Cart-Session')
-        );
-
-        return response()->json(
-            $this->carts->addItem($cart, $data),
-            201
-        );
-    }
-
-    public function updateItem(Request $request, CartItem $item)
-    {
-        $data = $request->validate([
+            'variant_id' => ['required', 'integer', 'min:1'],
             'quantity' => ['required', 'integer', 'min:1', 'max:1000'],
         ]);
 
-        return response()->json(
-            $this->carts->updateItem($item, $data['quantity'])
-        );
+        $cart = $this->carts->getOrCreate($this->customerId($request));
+
+        return response()->json($this->carts->addItem($cart, $data['variant_id'], $data['quantity']), 201);
     }
 
-    public function removeItem(CartItem $item)
+    public function updateItem(Request $request, int $item)
     {
-        $this->carts->removeItem($item);
+        $data = $request->validate(['quantity' => ['required', 'integer', 'min:1', 'max:1000']]);
 
-        return response()->json(['message' => 'Cart item removed.']);
+        $cartItem = $this->carts->getOrCreate($this->customerId($request))->items()->findOrFail($item);
+
+        return $this->carts->updateItem($cartItem, $data['quantity']);
+    }
+
+    public function removeItem(Request $request, int $item)
+    {
+        $this->carts->removeItem($this->carts->getOrCreate($this->customerId($request))->items()->findOrFail($item));
+
+        return response()->json(['message' => 'Item removed.']);
+    }
+
+    public function clear(Request $request)
+    {
+        $this->carts->clear($this->carts->getOrCreate($this->customerId($request)));
+
+        return response()->json(['message' => 'Cart cleared.']);
     }
 }

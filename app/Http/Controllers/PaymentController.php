@@ -2,50 +2,32 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Order;
 use App\Models\Payment;
-use App\Services\RefundService;
+use App\Services\PaymentService;
 use Illuminate\Http\Request;
 
 class PaymentController extends Controller
 {
-    public function __construct(private RefundService $refunds) {}
+    public function __construct(private PaymentService $payments) {}
 
+    /**
+     * POST /api/payments/webhook : called by the payment gateway, NOT by a browser. No JWT; the signature header proves it.
+     * Always answers 200 for a valid call (even a repeat), so the gateway stops retrying.
+     */
+    public function webhook(Request $request)
+    {
+        try {
+            $result = $this->payments->handleWebhook($request->getContent(), $request->header('X-Signature'));
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 401);
+        }
+
+        return response()->json(['result' => $result]);
+    }
+
+    /** Staff: every try the customer made to pay. */
     public function attempts(Payment $payment)
     {
-        return response()->json($payment->load('attempts'));
-    }
-
-    public function refund(Request $request, Order $order)
-    {
-        $data = $request->validate([
-            'amount' => ['required', 'numeric', 'gt:0'],
-            'method' => ['required', 'string', 'max:40'],
-            'reason' => ['required', 'string', 'max:255'],
-            'payment_id' => ['nullable', 'integer', 'exists:payments,id'],
-            'return_request_id' => ['nullable', 'integer', 'exists:return_requests,id'],
-        ]);
-
-        $refund = $this->refunds->create(
-            $order,
-            (float) $data['amount'],
-            $data['method'],
-            $data['reason'],
-            $data['payment_id'] ?? null,
-            $data['return_request_id'] ?? null,
-        );
-
-        return response()->json($refund, 201);
-    }
-
-    public function completeRefund(Request $request, \App\Models\Refund $refund)
-    {
-        $data = $request->validate([
-            'provider_reference' => ['nullable', 'string', 'max:150'],
-        ]);
-
-        return response()->json(
-            $this->refunds->complete($refund, $data['provider_reference'] ?? null)
-        );
+        return $payment->load('attempts');
     }
 }

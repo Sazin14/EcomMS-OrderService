@@ -12,6 +12,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         //
+        $this->app->singleton(PaymentGateway::class, fn () => match (config('orders.gateway.driver')) {
+            'sandbox' => new SandboxGateway(),
+            default => throw new \RuntimeException('Unknown PAYMENT_GATEWAY "'.config('orders.gateway.driver').'".'),
+        });
     }
 
     /**

@@ -2,50 +2,56 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\CartService;
+use App\Http\Controllers\Concerns\ReadsIdentity;
+use App\Models\Order;
 use App\Services\CheckoutService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class CheckoutController extends Controller
 {
-    public function __construct(
-        private CartService $carts,
-        private CheckoutService $checkout,
-    ) {}
+    use ReadsIdentity;
 
+    public function __construct(private CheckoutService $checkout) {}
+
+    /**
+     * POST /api/checkout   header: Idempotency-Key (any unique string per attempt; the same key returns the same order)
+     */
     public function store(Request $request)
     {
+        $key = (string) $request->header('Idempotency-Key');
+
+        abort_if(strlen($key) < 8 || strlen($key) > 100, 422, 'The Idempotency-Key header is required (8-100 characters).');
+
         $data = $request->validate([
+            'payment_method' => ['required', Rule::in([Order::COD, Order::ONLINE])],
             'shipping_address' => ['required', 'array'],
+            'shipping_address.name' => ['required', 'string', 'max:150'],
+            'shipping_address.phone' => ['required', 'string', 'max:40'],
+            'shipping_address.address' => ['required', 'string', 'max:500'],
+            'shipping_address.city' => ['required', 'string', 'max:100'],
+            'shipping_address.postcode' => ['nullable', 'string', 'max:20'],
+            'shipping_address.country' => ['nullable', 'string', 'size:2'],
             'billing_address' => ['nullable', 'array'],
-            'payment_method' => ['required', 'string', 'max:40'],
-            'discount' => ['nullable', 'numeric', 'min:0'],
-            'tax' => ['nullable', 'numeric', 'min:0'],
-            'shipping' => ['nullable', 'numeric', 'min:0'],
+            'email' => ['nullable', 'email', 'max:190'],
             'customer_note' => ['nullable', 'string', 'max:2000'],
+            'accept_preorder' => ['nullable', 'boolean'],
         ]);
 
-        $customerId = $request->attributes->get('user_type') === 'customer'
-            ? (int) $request->attributes->get('user_id')
-            : null;
+        [$order, $created] = $this->checkout->place($this->customerId($request), [
+            'idempotency_key' => $key,
+            'payment_method' => $data['payment_method'],
+            'shipping_address' => $data['shipping_address'],
+            'billing_address' => $data['billing_address'] ?? null,
+            'contact' => [
+                'name' => $data['shipping_address']['name'],
+                'phone' => $data['shipping_address']['phone'],
+                'email' => $data['email'] ?? null,
+            ],
+            'customer_note' => $data['customer_note'] ?? null,
+            'accept_preorder' => (bool) ($data['accept_preorder'] ?? false),
+        ]);
 
-        $cart = $this->carts->getOrCreate(
-            $customerId,
-            $request->header('X-Cart-Session')
-        )->load('items');
-
-        $order = $this->checkout->createOrder(
-            $cart,
-            $data['shipping_address'],
-            $data['billing_address'] ?? null,
-            $request->header('Idempotency-Key') ?? '',
-            $data['payment_method'],
-            (float) ($data['discount'] ?? 0),
-            (float) ($data['tax'] ?? 0),
-            (float) ($data['shipping'] ?? 0),
-            $data['customer_note'] ?? null,
-        );
-
-        return response()->json($order, 201);
+        return response()->json($order, $created ? 201 : 200);
     }
 }
