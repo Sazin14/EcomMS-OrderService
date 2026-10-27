@@ -1,22 +1,91 @@
 stages:
-  - build
+  - test
+  - promote
 
-build-and-push:
-  stage: build
-  image: docker:27-cli
-  services:
-    - name: docker:27-dind
-      alias: docker
-  variables:
-    DOCKER_HOST: tcp://docker:2376
-    DOCKER_TLS_CERTDIR: "/certs"
-    DOCKER_TLS_VERIFY: "1"
-    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+workflow:
   rules:
-    - if: '$CI_COMMIT_BRANCH == "devops"'
-  before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-    - docker info
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "main")'
+    - when: never
+
+variables:
+  ORDER_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  GITOPS_BRANCH: "devops"
+  GITOPS_DEPLOYMENT: "apps/order/service/deployment.yaml"
+
+build_test:
+  stage: test
+  tags:
+    - dell-local
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "main")'
   script:
-    - docker build --pull --platform linux/amd64 -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" .
-    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    - docker info
+    - docker build --pull --platform linux/amd64 -t "$ORDER_IMAGE" .
+    - docker run --rm --entrypoint php "$ORDER_IMAGE" artisan --version
+    - docker run --rm --entrypoint php "$ORDER_IMAGE" artisan route:list
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "push" ] &&
+         [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        echo "$CI_REGISTRY_PASSWORD" |
+          docker login "$CI_REGISTRY" \
+            -u "$CI_REGISTRY_USER" --password-stdin
+        docker push "$ORDER_IMAGE"
+        docker logout "$CI_REGISTRY"
+      else
+        echo "Validation only: image will not be published."
+      fi
+  after_script:
+    - docker logout "$CI_REGISTRY" || true
+    - docker image rm "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" || true
+
+promote_gitops:
+  stage: promote
+  tags:
+    - dell-local
+  needs:
+    - build_test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+  script:
+    - |
+      set -eu
+
+      if [ -z "${GITOPS_GITHUB_TOKEN:-}" ]; then
+        echo "ERROR: GITOPS_GITHUB_TOKEN is not configured."
+        exit 1
+      fi
+
+      WORK_DIR="$(mktemp -d)"
+      trap 'rm -rf "$WORK_DIR"' EXIT
+
+      git clone --depth 1 --branch "$GITOPS_BRANCH" \
+        "https://x-access-token:${GITOPS_GITHUB_TOKEN}@github.com/Rasiulknots/ecomms-gitops.git" \
+        "$WORK_DIR/gitops"
+
+      cd "$WORK_DIR/gitops"
+      git config user.name "GitLab CI"
+      git config user.email "gitlab-ci@users.noreply.github.com"
+
+      sed -i -E \
+        "s|(image: registry\\.gitlab\\.com/ecomms1/ecomms-orderservice:)[^[:space:]]+|\\1${CI_COMMIT_SHORT_SHA}|g" \
+        "$GITOPS_DEPLOYMENT"
+
+      echo "=== Updated Order Service image references ==="
+      grep -n 'image:' "$GITOPS_DEPLOYMENT"
+
+      EXPECTED_COUNT="$(grep -c "image: registry.gitlab.com/ecomms1/ecomms-orderservice:${CI_COMMIT_SHORT_SHA}" "$GITOPS_DEPLOYMENT")"
+      if [ "$EXPECTED_COUNT" -ne 2 ]; then
+        echo "ERROR: Expected exactly two Order Service image references; found $EXPECTED_COUNT."
+        exit 1
+      fi
+
+      git add "$GITOPS_DEPLOYMENT"
+
+      if git diff --cached --quiet; then
+        echo "GitOps already references this image; no commit needed."
+      else
+        git commit -m "Deploy Order Service ${CI_COMMIT_SHORT_SHA}"
+        git push origin "HEAD:${GITOPS_BRANCH}"
+      fi
