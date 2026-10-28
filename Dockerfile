@@ -88,7 +88,7 @@ WORKDIR /var/www/html
 COPY --from=composer-build --chown=www-data:www-data /app /var/www/html
 
 COPY --from=frontend-build --chown=www-data:www-data \
-    /app/public/build /var/www/html/public/build
+    /app/public/ /var/www/html/public/
 
 RUN mkdir -p \
         storage/framework/cache/data \
