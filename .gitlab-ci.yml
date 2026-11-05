@@ -25,6 +25,7 @@ build_test:
     - docker build --pull --platform linux/amd64 -t "$ORDER_IMAGE" .
     - docker run --rm --entrypoint php "$ORDER_IMAGE" artisan --version
     - docker run --rm --entrypoint php "$ORDER_IMAGE" artisan route:list
+    - docker run --rm --entrypoint php "$ORDER_IMAGE" artisan outbox:publish --help
     - |
       if [ "$CI_PIPELINE_SOURCE" = "push" ] &&
          [ "$CI_COMMIT_BRANCH" = "main" ]; then
@@ -76,8 +77,8 @@ promote_gitops:
       grep -n 'image:' "$GITOPS_DEPLOYMENT"
 
       EXPECTED_COUNT="$(grep -c "image: registry.gitlab.com/ecomms1/ecomms-orderservice:${CI_COMMIT_SHORT_SHA}" "$GITOPS_DEPLOYMENT")"
-      if [ "$EXPECTED_COUNT" -ne 2 ]; then
-        echo "ERROR: Expected exactly two Order Service image references; found $EXPECTED_COUNT."
+      if [ "$EXPECTED_COUNT" -ne 3 ]; then
+        echo "ERROR: Expected exactly three Order Service image references; found $EXPECTED_COUNT."
         exit 1
       fi
 
