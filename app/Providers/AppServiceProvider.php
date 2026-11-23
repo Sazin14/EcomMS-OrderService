@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\Payments\PaymentGateway;
+use App\Services\Payments\SandboxGateway;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -11,7 +13,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
         $this->app->singleton(PaymentGateway::class, fn () => match (config('orders.gateway.driver')) {
             'sandbox' => new SandboxGateway(),
             default => throw new \RuntimeException('Unknown PAYMENT_GATEWAY "'.config('orders.gateway.driver').'".'),
