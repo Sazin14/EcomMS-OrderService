@@ -69,4 +69,15 @@ Route::middleware(['auth.jwt', 'authz'])->prefix('admin')->group(function () {
     Route::post('orders/{order}/refunds', [Admin\RefundController::class, 'store'])->middleware('permission:refund.manage');
     Route::post('refunds/{refund}/process', [Admin\RefundController::class, 'process'])->middleware('permission:refund.manage');
     Route::post('refunds/{refund}/complete', [Admin\RefundController::class, 'complete'])->middleware('permission:refund.manage');
+
+    Route::get('promotions', [Admin\PromotionController::class, 'index'])->middleware('permission:promotion.view');
+    Route::post('promotions', [Admin\PromotionController::class, 'store'])->middleware('permission:promotion.create');
+    Route::put('promotions/{promotion}', [Admin\PromotionController::class, 'update'])->middleware('permission:promotion.update');
+    Route::patch('promotions/{promotion}', [Admin\PromotionController::class, 'update'])->middleware('permission:promotion.update');
+    Route::delete('promotions/{promotion}', [Admin\PromotionController::class, 'destroy'])->middleware('permission:promotion.delete');
+
+    Route::get('banners', [Admin\PromotionController::class, 'banners'])->middleware('permission:promotion.view');
+    Route::post('banners', [Admin\PromotionController::class, 'storeBanner'])->middleware('permission:promotion.create');
+    Route::put('banners/{banner}', [Admin\PromotionController::class, 'updateBanner'])->middleware('permission:promotion.update');
+    Route::delete('banners/{banner}', [Admin\PromotionController::class, 'destroyBanner'])->middleware('permission:promotion.delete');
 });
